@@ -48,7 +48,7 @@ def kmos_sci_reduce(ob_dir, task='all'):
 		sof.close()
 
 		process = subprocess.run(["esorex", "kmos_sci_red", 
-			"-no_combine", "-background", "-sky_tweak", "sci.sof"], 
+			"-no_combine", "-background", "-sky_tweak", "-pix_scale=0.1", "sci.sof"], 
 	       	stdout=subprocess.PIPE, 
 	        universal_newlines=True)
 
@@ -83,7 +83,7 @@ def kmos_sci_reduce(ob_dir, task='all'):
 		sof.close()
 
 		process = subprocess.run(["esorex", "kmos_sci_red", 
-			"-no_combine", "-background", "acq.sof"], 
+			"-no_combine", "-background", "-pix_scale=0.1", "acq.sof"], 
 	       	stdout=subprocess.PIPE, 
 	        universal_newlines=True)
 

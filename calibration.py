@@ -218,7 +218,8 @@ def process_calibrations(ob_dir, task='all'):
 		sof.write(f"{kreduce.kmos_calib_path}/kmos_wave_band.fits\tWAVE_BAND\n")
 		sof.close()
 
-		process = subprocess.run(["esorex", "kmos_illumination", "illum.sof"], 
+		process = subprocess.run(["esorex", "kmos_illumination", 
+			"-pix_scale=0.1", "illum.sof"], 
 	       	stdout=subprocess.PIPE, 
 	        universal_newlines=True)
 
