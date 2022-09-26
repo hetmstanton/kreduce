@@ -13,15 +13,7 @@ import glob
 
 import os
 
-def kmos_combine(frames, detector):
-
-    # make the star prameter file:
-    starparams_filename, combinefiles_filename = write_star_data_to_file(frames=frames,
-      psf_cut=0.8, edge_x=2., edge_y=2., detector=detector)
-
-    # now make the shifts file:
-    usershifts_filename = make_user_shifts_file(starparams_filename=starparams_filename,
-        detector=detector)
+def kmos_combine(frames, detector, combinefiles_filename, usershifts_filename):
 
     # get the names of the objects on the detector from one of the frames:
     exp = exposure.Exposure(sci_reconstructed_file=frames[0])
@@ -34,8 +26,19 @@ def kmos_combine(frames, detector):
         subprocess.call(kmo_comb, shell=True)
 
 
+def kmos_calculate_shifts(frames, detector, edge_x=2., edge_y=2., shifts_only=False):
+
+    # make the star prameter file:
+    starparams_filename, combinefiles_filename = write_star_data_to_file(frames=frames,
+      psf_cut=0.8, edge_x=edge_x, edge_y=edge_y, detector=detector)
+
+    # now make the shifts file:
+    usershifts_filename = make_user_shifts_file(starparams_filename=starparams_filename,
+        detector=detector)
+
+
 def make_user_shifts_file(starparams_filename, detector):
-    """C
+    """
     reate file of user shifts to use with ``kmos_combine --method="user"``
     
     Note:
@@ -66,7 +69,7 @@ def make_user_shifts_file(starparams_filename, detector):
     return usershifts_filename
 
 
-def write_star_data_to_file(frames, detector, psf_cut=0.8, edge_x=2., edge_y=2.):
+def write_star_data_to_file(frames, detector, psf_cut=0.8, edge_x=6., edge_y=6.):
     """
     Given a directory containin exposures to combine, will find stars and measure PSFs.
     Then creates a list of frames with PSF FWHM below a given value, saves
@@ -102,7 +105,10 @@ def write_star_data_to_file(frames, detector, psf_cut=0.8, edge_x=2., edge_y=2.)
         psf_center_x, psf_center_y, psf_fwhm, psf_ba,\
             psf_pa, invert_comment = star_psf(exposure=sci_reconstructed, detector=detector)
 
-        if psf_fwhm < psf_cut and psf_center_x > edge_x and psf_center_y > edge_y:
+        if psf_ba == 1.0 and psf_pa == 0.0:
+            star_table_bad.append([frame, sci_reconstructed.frame_time, psf_center_x, 
+                psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
+        elif psf_fwhm < psf_cut and psf_center_x > edge_x and psf_center_y > edge_y:
             combine_files.append([frame, 'SCI_RECONSTRUCTED'])
             star_table.append([frame, sci_reconstructed.frame_time, psf_center_x, 
                 psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
@@ -161,7 +167,7 @@ def star_fit_profile(exposure, detector):
         star_ifu = exposure.star_ifu_detector3
 
     # copy the IFU into its own file:
-    kmo_copy = 'esorex kmo_copy -x=1 -y=1 -z=1 -xsize=14 -ysize=14 -zsize=2048 -ifu={:s} {:s}'.format(str(star_ifu), 
+    kmo_copy = 'esorex kmo_copy -x=1 -y=1 -z=1 -xsize=28 -ysize=28 -zsize=2048 -ifu={:s} {:s}'.format(str(star_ifu), 
         exposure.filename)
     subprocess.call(kmo_copy, shell=True)
     status, copyfile = subprocess.getstatusoutput("find . -maxdepth 1 -iname COPY.fits")
@@ -238,7 +244,8 @@ def star_psf(exposure, detector):
     psf_r_y      = star_hdr['HIERARCH ESO PRO FIT RADIUS Y']
 
     # Get FWHM, BA, and PA
-    psf_fwhm = 2.3548 * 0.5 * (psf_r_x + psf_r_y) * 0.2  # fwhm in arcsec
+    arcsec_per_pix = 0.1
+    psf_fwhm = 2.3548 * 0.5 * (psf_r_x + psf_r_y) * arcsec_per_pix  # fwhm in arcsec
     psf_ba   = psf_r_y / psf_r_x
     psf_pa   = star_hdr['HIERARCH ESO PRO FIT ROT']
     if psf_pa > 0.:
