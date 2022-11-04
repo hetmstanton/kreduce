@@ -1,27 +1,24 @@
+# imports
 import kreduce
 from . import utils
-
 from astropy.io import fits
-
 import glob
-
 import sys
-
 import os
 import shutil
-
 import subprocess
-
 import argparse
 
 def kmos_sci_reduce(ob_dir, task='all'):
 
+	# Sort out directories
 	abs_ob_dir = os.path.abspath(ob_dir)
 
 	root_dir = os.getcwd()
 
 	print(f"\n*** [kreduce-sci-red]: running {task.upper()} calibrations for {abs_ob_dir}")
 
+	# run processing for science frames
 	if task == "all" or task == "sci":
 
 		print(f"\n*** [kreduce-sci-red]: processing SCIENCE frames")
@@ -30,12 +27,15 @@ def kmos_sci_reduce(ob_dir, task='all'):
 
 		# if there are already SCI_CONSTRUCTED files in directory, delete them
 
+		# Open all science frames
 		sci_files = glob.glob(f"*-sci.fits")
 
+		# add to sof file
 		sof = open(f"sci.sof", 'w')
 		for sci in sci_files:
 			utils.add_file_to_sof(sof=sof, file=sci, file_type='SCIENCE')
 
+		# Apply external data from previous methods
 		sof.write(f"{abs_ob_dir}/calib/XCAL_HKHKHK.fits\tXCAL\n")
 		sof.write(f"{abs_ob_dir}/calib/YCAL_HKHKHK.fits\tYCAL\n")
 		sof.write(f"{abs_ob_dir}/calib/LCAL_HKHKHK.fits\tLCAL\n")
@@ -43,10 +43,12 @@ def kmos_sci_reduce(ob_dir, task='all'):
 		sof.write(f"{abs_ob_dir}/calib/ILLUM_CORR_HKHKHK.fits\tILLUM_CORR\n")
 		sof.write(f"{abs_ob_dir}/calib-std/TELLURIC_HKHKHK.fits\tTELLURIC\n")
 
+		# Apply static calibration frames
 		sof.write(f"{kreduce.kmos_calib_path}/kmos_wave_band.fits\tWAVE_BAND\n")
 		sof.write(f"{kreduce.kmos_calib_path}/kmos_oh_spec_hk.fits\tOH_SPEC\n")
 		sof.close()
 
+		# Run kmos_sci_red recipe
 		process = subprocess.run(["esorex", "kmos_sci_red", 
 			"-no_combine", "-background", "-sky_tweak", "-pix_scale=0.1", "sci.sof"], 
 	       	stdout=subprocess.PIPE, 
@@ -57,6 +59,8 @@ def kmos_sci_reduce(ob_dir, task='all'):
 
 		sof.close()
 
+	# Same as above in terms of method, but on acquisiton frames.
+	# What is the difference?
 	if task == "all" or task == "acq":
 
 		print(f"\n*** [kreduce-sci-red]: processing ACQUISITION frames")

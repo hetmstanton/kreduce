@@ -1,0 +1,129 @@
+-> kmos_dark
+Description: calculates the master dark frame: the readings of the device when not observing and it's associated noise.
+It produces the BADPIX_DARK frame - pixels above/below the positive or negative threshold which are flagged. This frame is 
+then input into kmos_flat. 
+		
+Method combines all dark frames. The data and noise from this frame go into making the master dark frame. These values are
+also used to caluclate means and standard deviations which can be used to flag bad pixels when combined with the master frame. 
+The resulting mask is the BAD_PIX Mask. Also produced dark values. No. of bad pixels is the QC1 parameter.
+
+-> kmos_flat
+Description: creates the master flat field and calibration frame needed for the spatial calibration of all three detectors.
+
+Steps: 
+	- number of saturated pixels in raw lamp-on frames counted, and then mean frame and associated noise map (std err) 
+	from lamp_on frames are calculated.
+	- Same is done with lamp_off
+	_ Two frames are subrtated, then sorted. Pixels outwith of certain thresholds will be flagged as bad pixels, as will
+	pixels surrounded by bad pixels. This mask is combined with the dark bad pixel mask to produce an overall bad pixel mask.
+	- Line profiles are taken from the frame, and alysis for existing rotation, cut or missing slitlets is determined to find
+	the exact position and shape of the edge. *?*
+	- From this the bas pixel mask is updated and spectral curvature calibration frames (LUTs) - one in x, one in y - are 
+	calculated.
+	This produces: the master flatfield frame, which corrects for variations across the detector; a full noise map; and QC 
+	parameters indicating lamp efficiency and signal to noise. 
+
+-> kmos_wave_cal
+Description:  creates a wavelength calibration frame needed for all three of the deetecotrs.
+
+Steps:
+	- subtracts the raw lamp on and off frames, and the result is split into the 14 slitlets per IFU using the flatfield bad
+	pizel mask. Ignoring bad pixels, the following steps are applied to each slitlet.
+	- Wavelenght positions of arc lines are measured and matched to the list of nominal external arc lines, resulting in a 
+	first estimate of where the lines lie in the slitlit.
+	- Exact positions of all lines across the width are fit with a gauss fit.
+	- Polynomial fitting of each line across the slitlit is done to extrapolat einexist values resulting from rotation.
+	- Polynomial is fit along wavelength direction to get the calibration. This produces the 2D wavelength calibration frame (LUT) 
+	- The arc frame is then reconstructed as a cube and split into slitlets to allow for quick visual checks on the
+	quality of the calibration.
+	Produces LCAL, the calibration frame in spectral dimensons *?*
+	and Det_IMG_Wave, the resampled cube image with all slitlets of all ifus aligned next to each other. (*?* what would this
+	look like?)
+
+-> kmos_illumination
+Description: creates a calibration frame to correct spatial non-uniformity of the flatfield for all 
+24 IFUs. It can reduce sky flats (FLAT_SKY) or lamp flatfields(FLAT_ON) data. The created lumination correction 
+is carreid forward to the telluric method.
+
+Steps:
+	- RAW frames are separated by rotaton angle and individually reduced.
+	- RAW frames are averaged using pixel rejection and large sigma for clippung.
+	- An appropriate dark frame is subtracted. The result is divided by master flat field for FLAT_SKY input.
+	- Frame is split into frames referring to single IFUs, and the cubes for each IFU are reconstructed using a bad
+    pixel mask, spectral curvature calibration frame, wavelength calibration frame. Subsequently, collapsed to 
+	spatial images.
+	- The images are then normalised as a group (mean of all of them is unity).
+
+	Output: ILLUM_CORR, the spatial non-uniformity calibration frame. Also, SKYFLAT_EDGE, the parameters of fitted edges of
+	all IFUS of all detectors, from the FLAT_SKY frames.
+
+-> kmos_std_star
+Description: creates a spectrum for telluric correction, derives a zeropoint for flux calibration, and estimates
+spatial resolution.
+
+DEF: Telluric correction is the correction of the effects of the earths atmosphere.
+		
+Steps:
+	- object and sky frames of IFUs containing observed standard stars are extracted.
+	- signal frame and noise frame reconstructued as cubes using kmos_flat bad pixel mask, kmos_flat two spectral 
+	curvature calibration frames, and the kmos_wave_cal calibration frame. 
+	- The reconstructed cube is divided spatially by spatial illumination correction frame. For each spatial slice a 
+	2D profile is fit to obtain the position of the object.
+	- The signal cube is collapsed to a spatial image, resulting into an image of the PSF of the IFU.
+	- From the signal and noise cubes the signal and error spectra are extracted. 
+	- Further processing depending on star type is applied, adn the result is divided by a curve correspodning to the star
+	type's effective temperature.
+	- the spectrum is normalised to yield telluric correction and the final error spectrum.
+	-zeropoint and theoruput can be found by diving the temporary spectru by the telluric correction, and including the star 
+    magnitude and the gain of the detector.
+
+	Output: TELLURIC, the normalised telluric spectrum;  STAR_SPEC, the extracted star spectrum, TDS_IMAGE, the standard star
+	PSF; STD_MASK, the mask used to extract the star spectrum; NOISE SPEC, the shot noise.
+
+-> kmos_combine
+Description: spatially combines cubes 
+This recipe shifts several exposures of an object and combines them, forming an output cube that is larger than the 
+input cubes according to the applied shifts (from usershifts_filename). An additional border of NaN values are added.
+For each pixel, a new value will be calculated and written to the output cube.
+
+Can specify specific IFUs to combine, specify with paremeter --ifus. To combine a specific object, combine with the parameter
+--name [object_name].
+    
+--method=user specifies that the shifts will be read from a user specified file for combination purposes.
+
+Steps:
+- User provides a file with stored shift information, relative to the first cube in the list.
+- The actual shift is executed.
+Data cubes and corresponding noise maps are combined using rejection. 
+
+-> kmo_copy
+Description: copies a specified region of an IFU-based cube, image or vector to a new fits file. By default applies to
+all ifus but can specify a singular ifu to use.
+
+-> kmo_make_image
+Description: collapses a cube along the spectral axis using rejection to make an image. All spectral slices are used.
+Errors are propogates for the same spectral ranges as for the input data if a noise map is provided.
+
+-> kmo_fit_profile
+Description: fits spectral or spatial profiles with a simple function, e.g. to measure resolution or find the 
+centre of a source
+
+-> kmos_sci_red
+Description: reconstructs obj/sky pairs individually and then combines them.
+If an OH spectrum is given in the SOF file, the wavelenght axis is corrected using OH lines as reference.
+Every IFU containing an object will be reconstructed and divided by telluric and illumination corrections. Reconstructed
+objects with the same names are then combined.
+		
+Steps: (repeated for each IFU containing an object e.g. not stars)
+	- raw object is sky subtracted and reconstructed into a cube.
+	- resulting data and noise cubes are each divded by tehtelluric spectrum.
+	- both data and noise cubes are divided spatially by illumination correction.
+	- cubes are converted into physical units if possible.
+
+If OH spectrum is provided, process becomes more complicated.
+
+Output: SCI_COMBINED, combined cubes with noise; SCI_RECONSTRUCTED, reconstructed cubes; EXP_MASK, exposure time frame,
+with every spaxel indicating how many input frames are taken into account when combining; + 2 optional interim frames
+for sky tweaking; +2 optional collabes combined and reconstructed cube frames.
+
+-> 
