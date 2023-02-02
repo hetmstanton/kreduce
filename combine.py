@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patches as pat
 
 def kmos_combine(frames, detector, combinefiles_filename, usershifts_filename):
+    """ combines all the exposures of a given object into a combined final cube """
 
     # get the names of the objects on the detector from one of the frames and set.
     exp = exposure.Exposure(sci_reconstructed_file=frames[0])
@@ -21,13 +22,29 @@ def kmos_combine(frames, detector, combinefiles_filename, usershifts_filename):
 
     # Run Esorex kmos_combine method
     for object_name in object_names:
+
         kmo_comb = 'esorex kmos_combine --method=user --filename={:s} --name={:s} {:s}'.format(usershifts_filename,
             object_name, combinefiles_filename)
         subprocess.call(kmo_comb, shell=True)
 
+        # check combination for zero cubes 
+        while True:
+
+            # check final cube to make sure its not zero
+            cube_path = f'{os.getcwd()}/COMBINE_SCI_RECONSTRUCTED_{object_name}.fits'
+            hdul = fits.open(cube_path)
+            data = hdul[1].data
+
+            checksum = np.sum(np.nansum(data, axis=0))
+            if checksum != 0:
+                break
+            print(f'-> [kreduce-combine]: {object_name} failed to combine properly. Re-running... ')
+            with open('./combination_log.txt', 'a') as file:
+                file.write(f'Re-combining {object_name} as combination bugged...')
+            subprocess.call(kmo_comb, shell=True)
+
     # Process produces a COMBINED_CUBE, COMBINED_IMAGE
     # and EXP_MASK - exposure time frame, every spaxel indicating how many input frames taken into account when combining.
-
 
 def kmos_calculate_shifts(frames:list, detector:int, edge_x:float=2., edge_y:float=2., shifts_only:bool=False):
     """ creates the files containing the user shifts, first by creating a starparams_file and combinefiles using 
@@ -36,13 +53,42 @@ def kmos_calculate_shifts(frames:list, detector:int, edge_x:float=2., edge_y:flo
     # make the star parameter file:
     starparams_filename, combinefiles_filename = write_star_data_to_file(frames=frames,
       psf_cut=0.8, edge_x=edge_x, edge_y=edge_y, detector=detector)
-    # Rejects anything over .8, edge_x,y will reject things within two pixels from the edge
 
     # now make the user shifts file that is fed into kmos_combine:
     usershifts_filename = make_user_shifts_file(starparams_filename=starparams_filename,
         detector=detector, frames=frames)
 
-def make_user_shifts_file(frames: list, starparams_filename:str, detector:int):
+def make_user_shifts_file_beta(frames:list, starparams_filename:str, combinefiles_filename:str, detector:int) -> str:
+
+    # read in star params data
+    str_star_table = np.genfromtxt(starparams_filename, dtype=None,
+        names=True, skip_header=1)
+    framenames = str_star_table['Frame']
+    star_table = np.genfromtxt(starparams_filename,
+        names=True, skip_header=1)
+    n_frames = len(star_table)
+    print(starparams_filename)
+
+    for ifu in range(1, 25):
+
+        # set up filenames        
+        ifu_combinefiles_filename = combinefiles_filename.replace('.sof', f'_ifu{ifu}.sof')
+        ifu_usershifts_filename   = starparams_filename.replace('.txt', f'_ifu{ifu}.txt')
+
+        # loop through frames, skip any invalid frames
+        acceptable_frames = []
+        for frame in frames:
+            exp = exposure.Exposure(frame)
+            if exp.hdulist[f'IFU.{ifu}.DATA'].header['NAXIS'] > 0:
+                acceptable_frames.append(frame.split('/')[-1])
+
+    print(str_star_table['Frame'])
+    print(np.where(acceptable_frames in str_star_table['Frame'].astype(str)))
+    sys.exit()
+
+
+
+def make_user_shifts_file(frames:list, starparams_filename:str, detector:int):
     """
     create file of user shifts to use with ``kmos_combine --method="user"``
     
@@ -76,9 +122,8 @@ def make_user_shifts_file(frames: list, starparams_filename:str, detector:int):
     alldecdata = np.array([framenames, star_table['FWHM_arcsec'], seeing, star_table['XCEN_pix'],
         star_table['YCEN_pix'], all_shiftx, all_shifty], dtype='str') # changed str from U40
 
-    # TODO: Doubling up on detector number in the name - fix
+    # generate relevant filenaes
     usershifts_filename = starparams_filename.replace('.txt', '_usershifts.txt'.format(detector))
-    ### TODO: Make this name more appropriate, maybe store in a different directory? o.g star psfs maybe?
     detectorshifts_filename = starparams_filename.replace('.txt', '_detectorshifts.txt'.format(detector))
 
     np.savetxt(usershifts_filename, np.array([shiftx, shifty]).T, fmt='%f', delimiter='    ')
@@ -140,28 +185,31 @@ def write_star_data_to_file(frames:list, detector:int, psf_cut:float=0.8, edge_x
             psf_pa, invert_comment = star_psf(exposure=sci_reconstructed, ob=ob, detector=detector, dither=(i%4)) 
 
         # How to handle star point spread function based on parameters
-        # What does this top one do? #
         if psf_ba == 1.0 and psf_pa == 0.0:
+            print('WARNING: Bad ba / pa values in PSF of {:s}'.format(frame))
             star_table_bad.append([frame, sci_reconstructed.frame_time, psf_center_x, 
                 psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
-            with open('../textfiles/Oops.txt', 'a') as file:
-                file.write(f'{frame} got psf_ba = 1.0, psf_pa = 0.0.\n{psf_center_x} {psf_center_y} {psf_fwhm} {psf_ba} {psf_pa}\n\n')
+
         # If FWHM is less than the cut off and the center is bigger than the edge cut off
         elif psf_fwhm < psf_cut and psf_center_x > edge_x and psf_center_y > edge_y:
             combine_files.append([frame, 'SCI_RECONSTRUCTED'])
             star_table.append([frame, sci_reconstructed.frame_time, psf_center_x, 
                 psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
-        # If Nan, append to the bad file
-        elif psf_center_x == np.nan:
+
+        elif psf_center_x == np.nan and psf_center_y == np.nan:
+            print('WARNING: No star found in PSF of {:s}'.format(frame))
             star_table_bad.append([frame, sci_reconstructed.frame_time, psf_center_x, 
                 psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
-            with open('../textfiles/Oops.txt', 'a') as file:
-                file.write(f'{frame} got psf_center_x=nan.\n{psf_center_x} {psf_center_y} {psf_fwhm} {psf_ba} {psf_pa}\n\n')
+
+        # If Nan, append to the bad file
+        elif psf_center_x == np.nan:
+            print('WARNING: NaN values in PSF of {:s}'.format(frame))
+            star_table_bad.append([frame, sci_reconstructed.frame_time, psf_center_x, 
+                psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
+
         # Handle other bad frames
         else:
             print('WARNING: Something wrong with PSF in {:s}'.format(frame))
-            with open('../textfiles/Oops.txt', 'a') as file:
-                file.write(f'{frame} had something else wrong.\n{psf_center_x} {psf_center_y} {psf_fwhm} {psf_ba} {psf_pa}\n\n')
             star_table_bad.append([frame, sci_reconstructed.frame_time, psf_center_x, 
                 psf_center_y, psf_fwhm, psf_ba, psf_pa, invert_comment])
 
@@ -191,8 +239,7 @@ def write_star_data_to_file(frames:list, detector:int, psf_cut:float=0.8, edge_x
     return starparams_filename, combinefiles_filename
 
 def star_fit_profile(exposure:object, detector:int, edge_cut:int=3):
-    """
-    Fit gaussian profiles to star to find PSFs
+    """Fit gaussian profiles to star to find PSFs
     Using ESO command line pipeline tools (``esorex``) extract the star from the exposure,
     fit a Gaussian profile to it, and save the fitted star to a new fits file ``star_file_name``.
 
@@ -206,13 +253,11 @@ def star_fit_profile(exposure:object, detector:int, edge_cut:int=3):
     # get the star ifus:
     exposure.get_star_ifus()
 
-    # Set IFU corresponding to given detector
-    if detector == 1:
-        star_ifu = exposure.star_ifu_detector1
-    elif detector == 2:
-        star_ifu = exposure.star_ifu_detector2
-    else:
-        star_ifu = exposure.star_ifu_detector3
+    # Set IFU corresponding to given detector and account for missing
+    star_ifu = select_star_ifu(exposure, detector)
+    if star_ifu == -1:
+        print('-> [kreduce-star-fit-profile]: Invalid Star IFU. Skipping...')
+        return None
 
     # copy the IFU into its own file:
     kmo_copy = 'esorex kmo_copy -x=1 -y=1 -z=1 -xsize=28 -ysize=28 -zsize=2048 -ifu={:s} {:s}'.format(str(star_ifu), 
@@ -282,7 +327,10 @@ def star_psf(exposure:object, detector:int, ob:int, dither:int, edge_cut:int=2.)
 
     exposure.invert = False
     # get the star file name and the invert value by fitting the profile to the star
-    exposure.starfile, exposure.invert, image = star_fit_profile(exposure, detector) 
+    try:
+        exposure.starfile, exposure.invert, image = star_fit_profile(exposure, detector) 
+    except:
+        return np.nan, np.nan, 0, 0, 0, '# no valid star'
 
     # set relevant comment 
     invert_comment = '# weird star, inverted flux' if exposure.invert else ''
@@ -345,27 +393,45 @@ def plot_star_psf(exposure: object, detector: int, ob: int, dither: int, image_d
     plt.ylabel('y [pix]')
 
     # Get Star IFU ID
-    if detector == 1:
-        ifu = exposure.star_ifu_detector1
-    if detector == 2:
-        ifu = exposure.star_ifu_detector2
-    if detector == 3:
-        ifu = exposure.star_ifu_detector3
+    ifu = select_star_ifu(exposure, detector)
 
-    FileID = int(exposure.filename.split('.')[2].split('-')[0])
-    ObjName = exposure.hdr[f'HIERARCH ESO OCS ARM{ifu} NAME']
-    bsc = 'SKYCORR' if 'SKYCORR' in exposure.starfile else 'BASIC'
+    if ifu == -1:
+        print('-> [kreduce-combine]: No found star IFU. Skipping...')
+    else:
+        FileID = int(exposure.filename.split('.')[2].split('-')[0])
+        ObjName = exposure.hdr[f'HIERARCH ESO OCS ARM{ifu} NAME']
+        bsc = 'SKYCORR' if 'SKYCORR' in exposure.starfile else 'BASIC'
 
-    # Save Figure
-    savename = f'../../../star_psf/{bsc.lower()}/d{detector}/EC_{ObjName}_OB{ob}_{FileID:04}_psfplot.png'
-    title = f'{ObjName} [{bsc}] [D:{detector} OB:{ob:02} FID:{FileID:04}]'
-    plt.title(title)
-    plt.savefig(savename)
+        # Save Figure
+        savename = f'../../../star_psf/{bsc.lower()}/d{detector}/EC_{ObjName}_OB{ob}_{FileID:04}_psfplot.png'
+        title = f'{ObjName} [{bsc}] [D:{detector} OB:{ob:02} FID:{FileID:04}]'
+        plt.title(title)
+        plt.savefig(savename)
 
-    # Comment if weird
-    with open(f'../../../star_psf/{bsc.lower()}/d{detector}/WeirdStars.txt', 'a') as file:
-        file.write(f'{exposure.filename} | Obj: {ObjName} | OB: {ob:02} | Weird: {exposure.invert}\n')
+        # Comment if weird
+        with open(f'../../../star_psf/{bsc.lower()}/d{detector}/WeirdStars.txt', 'a') as file:
+            file.write(f'{exposure.filename} | Obj: {ObjName} | OB: {ob:02} | Weird: {exposure.invert}\n')
 
+def select_star_ifu(exposure:object, detector:int) -> int:
+    """ determines the ifus tracing stars in a given exposure, and should one be missing for a 
+        specific detector, replaces it with another suitable ifu or exits. """
+    try:
+        if detector == 1:
+            star_ifu = exposure.star_ifu_detector1
+        elif detector == 2:
+            star_ifu = exposure.star_ifu_detector2
+        else:
+            star_ifu = exposure.star_ifu_detector3
+    except:
+        print(f'-> [kreduce-calculate_shifts]: detector {detector} missing star ifu.')
+        return -1
+        try:
+            star_ifu = exposure.star_ifus[0]
+            print(f'-> [kreduce-calculate_shifts]: Substituting star ifu {star_ifu}.')
+        except:
+            print(f'-> [kreduce-calculate_shifts]: No suitable star ifus. Exiting...')
+            sys.exit()        
+    return star_ifu
 
 
 

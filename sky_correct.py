@@ -61,22 +61,22 @@ def make_sky_residual_spectrum(exposure, show=True, masking=True):
                 dwl = ifu_header['CDELT3']
                 naxis = ifu_cube.shape[0]
                 wlf = wl0 + (dwl*naxis)
-                wavelengths = np.arange(wl0, wlf, dwl)
-                #print(wl0, wavelengths[0], wlf, wavelengths[-1], dwl)
+                wavelengths = np.arange(wl0, wlf, dwl) * 1e4 #μm -> Å
 
                 # convert from micrometers to anstroms
                 wavelengths *= 1e4
 
                 # make and apply mask
                 cube_mask = mask_ifu_cube(ifu_cube, redshift.astype(float), wavelengths)
-                ifu_cube[cube_mask] = np.nan
+                m_ifu_cube = np.copy(ifu_cube)
+                m_ifu_cube[cube_mask] = np.nan
 
             if 1 <= ifu <= 8:
-                detector1.append(ifu_cube)
+                detector1.append(m_ifu_cube)
             elif 9 <= ifu <= 16:
-                detector2.append(ifu_cube)
+                detector2.append(m_ifu_cube)
             else:
-                detector3.append(ifu_cube)
+                detector3.append(m_ifu_cube)
 
     # Set values as arrays and work out cumulative length
     len_for_stack = len(detector1) + len(detector2) + len(detector3)
@@ -86,7 +86,6 @@ def make_sky_residual_spectrum(exposure, show=True, masking=True):
 
     # Combine all detectors into one overall array
     detector_all = np.concatenate((detector1, detector2, detector3), axis=0)
-
     # Handle nans, take median of all detectors, setting any nans to zero
     skyspec_1D_all = np.nanmedian(detector_all, axis=(0, 2, 3))
     skyspec_1D_all[np.isnan(skyspec_1D_all)] = 0.0
@@ -215,7 +214,6 @@ def sky_subtract_residual_sky(exposure, show=True):
             # calculate corresponding error spectrum
             error1d = np.nanstd(ext_copy, axis=(1, 2))/np.sqrt(ext_copy.shape[1] * ext_copy.shape[2])
 
-            # Plotting ?
             if show:
                 
                 # Simply a fancy way of producing subplots of the correct format

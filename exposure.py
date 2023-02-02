@@ -23,14 +23,9 @@ class Exposure:
         All objects in the catalogues have a name: KVS_{number}
         If number >= 430 this is not a science target and therefore
         will be one of the stars placed in each dectector.
-        - These stars are the ones used for calculating the shifts!
-        - - Aka this may be the bit that I'm working on 
 
         Note we skip ifu 14 because it was not used on our
-        program. <- this is the arm that was out of comission
-
-        - This function basically determines which IFUs are tracing stars
-        and which are tracing science targets. 
+        program.
         """
 
         self.star_ifus = []
@@ -52,7 +47,6 @@ class Exposure:
 
                     self.star_ifus.append(ifu)
 
-                    # 
                     # useful to also separate by detector:
                     if 1 <= ifu <= 8:
                         self.star_ifu_detector1 = ifu
@@ -69,13 +63,15 @@ class Exposure:
 
         This is useful for kmos_combine, when we want to combine
         only objects on one detector to ensure accurate shifts.
-
-        
         """
 
         self.objects_per_detector = {'1': [],
                                      '2': [],
                                      '3': []}
+
+        self.valid_ifus_per_detector = {'1': [],
+                                        '2': [],
+                                        '3': []}
 
         for ifu in range(1, 25, 1): # Iterate through all IFUs
 
@@ -89,10 +85,13 @@ class Exposure:
                 # Append object name to the appropriate detector list.
                 if 1 <= ifu <= 8:
                     self.objects_per_detector['1'].append(name)
+                    self.valid_ifus_per_detector['1'].append(ifu)
                 elif 9 <= ifu <= 16:
                     self.objects_per_detector['2'].append(name)
+                    self.valid_ifus_per_detector['2'].append(ifu)
                 else:
                     self.objects_per_detector['3'].append(name)
+                    self.valid_ifus_per_detector['3'].append(ifu)
   
 
 
