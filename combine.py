@@ -20,7 +20,7 @@ def kmos_combine(frames, detector, combinefiles_filename, usershifts_filename):
     exp.get_object_names_for_each_detector()
     object_names = exp.objects_per_detector["{:d}".format(detector)]
 
-    # Run Esorex kmos_combine method
+    # Run esorex kmos_combine method
     for object_name in object_names:
 
         kmo_comb = 'esorex kmos_combine --method=user --filename={:s} --name={:s} {:s}'.format(usershifts_filename,
