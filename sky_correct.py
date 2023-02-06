@@ -27,11 +27,10 @@ def make_sky_residual_spectrum(exposure, show=True, masking=True):
 
     # Create stacks of 'empty' cubes:
     exposure.filename_skyspec = exposure.filename.replace('.fits', '_SKYSPEC.fits')
-
     detector1, detector2, detector3 = [], [], []
 
     # determine redshift data 
-    if masking: obj_ids, obj_redshifts = find_z(filepath=f'{os.getcwd()}/data/ob-data/kvs_final_target_catalogue.txt')
+    if masking: obj_ids, obj_redshifts = systemic_z('./analysis/lineresults/summary/redshift_catalogue.txt') # find_z(filepath=f'{os.getcwd()}/data/ob-data/kvs_final_target_catalogue.txt')
 
     # Add non-empty, non reference star IFUS to their relevant detector arrays
     for ifu in range(1, 25):
@@ -375,6 +374,12 @@ def find_z(filepath:str) -> tuple:
     # extract object ids and redshifts
     data = np.genfromtxt(filepath, dtype=str, usecols=[0,2], unpack=True)
     return (data[0], data[1])
+
+def systemic_z(path:str) -> tuple:
+    redshift_tabl = np.genfromtxt(path, dtype=str)
+    obj_names = redshift_tabl.T[0]
+    sys_z = redshift_tabl.T[3].astype(float)
+    return (obj_names, sys_z)
 
 
 
